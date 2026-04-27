@@ -1,0 +1,171 @@
+name: Fork Auto Deploy
+
+on:
+  push:
+    branches:
+      - develop
+  workflow_dispatch:
+    inputs:
+      force_deploy:
+        description: 'Force deployment regardless of thresholds'
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  decide:
+    runs-on: ubuntu-latest
+    outputs:
+      should_deploy: ${{ steps.decision.outputs.should_deploy }}
+      reason: ${{ steps.decision.outputs.reason }}
+      commit_count: ${{ steps.count.outputs.commit_count }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect deploy-relevant changes
+        id: changes
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            relevant:
+              - 'cvat-ui/**'
+              - 'cvat/**'
+              - 'cvat-core/**'
+              - 'cvat-canvas/**'
+              - 'cvat-canvas3d/**'
+              - 'Dockerfile'
+              - 'Dockerfile.ui'
+              - 'docker-compose*.yml'
+
+      - name: Count commits since last deploy tag
+        id: count
+        run: |
+          set -euo pipefail
+          git fetch --tags --force
+
+          if git rev-parse -q --verify refs/tags/deploy/last >/dev/null; then
+            COUNT=$(git rev-list --count refs/tags/deploy/last..HEAD)
+          else
+            COUNT=999999
+          fi
+
+          echo "commit_count=$COUNT" >> "$GITHUB_OUTPUT"
+
+      - name: Decide deployment
+        id: decision
+        env:
+          FORCE_DEPLOY: ${{ github.event.inputs.force_deploy || 'false' }}
+          RELEVANT_CHANGED: ${{ steps.changes.outputs.relevant }}
+          COMMIT_COUNT: ${{ steps.count.outputs.commit_count }}
+          COMMIT_THRESHOLD: ${{ vars.DEPLOY_COMMIT_THRESHOLD || '5' }}
+        run: |
+          set -euo pipefail
+
+          SHOULD_DEPLOY=false
+          REASON='threshold-not-met'
+
+          if [[ "$FORCE_DEPLOY" == 'true' ]]; then
+            SHOULD_DEPLOY=true
+            REASON='manual-force'
+          elif [[ "$RELEVANT_CHANGED" == 'true' ]]; then
+            SHOULD_DEPLOY=true
+            REASON='relevant-files-changed'
+          elif [[ "$COMMIT_COUNT" -ge "$COMMIT_THRESHOLD" ]]; then
+            SHOULD_DEPLOY=true
+            REASON='commit-threshold-reached'
+          fi
+
+          echo "should_deploy=$SHOULD_DEPLOY" >> "$GITHUB_OUTPUT"
+          echo "reason=$REASON" >> "$GITHUB_OUTPUT"
+
+          echo "Deploy decision: $SHOULD_DEPLOY ($REASON)"
+
+  deploy:
+    needs: decide
+    if: needs.decide.outputs.should_deploy == 'true'
+    runs-on: ${{ fromJson(vars.DEPLOY_RUNS_ON || '["self-hosted"]') }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run deploy on self-hosted runner
+        env:
+          HEALTHCHECK_URL: ${{ vars.DEPLOY_HEALTHCHECK_URL || 'http://localhost:8080/api/server/about' }}
+        run: |
+          set -euo pipefail
+
+          PREVIOUS_COMMIT=$(git rev-parse HEAD^ 2>/dev/null || true)
+          DEPLOY_FAILED=0
+
+          docker compose \
+            -f docker-compose.yml \
+            -f docker-compose.dev.yml \
+            build cvat_server cvat_ui || DEPLOY_FAILED=1
+
+          if [[ "$DEPLOY_FAILED" -eq 0 ]]; then
+            docker compose \
+              -f docker-compose.yml \
+              -f docker-compose.dev.yml \
+              up -d || DEPLOY_FAILED=1
+          fi
+
+          if [[ "$DEPLOY_FAILED" -eq 0 ]]; then
+            MAX_TRIES=20
+            until curl -fsS "$HEALTHCHECK_URL" >/dev/null || [[ "$MAX_TRIES" -eq 0 ]]; do
+              echo "Waiting for healthcheck: $HEALTHCHECK_URL"
+              MAX_TRIES=$((MAX_TRIES - 1))
+              sleep 5
+            done
+
+            if [[ "$MAX_TRIES" -eq 0 ]]; then
+              echo "Healthcheck failed after deploy"
+              DEPLOY_FAILED=1
+            fi
+          fi
+
+          if [[ "$DEPLOY_FAILED" -eq 1 ]]; then
+            if [[ -n "$PREVIOUS_COMMIT" ]]; then
+              echo "Deploy failed. Rolling back to $PREVIOUS_COMMIT"
+              git reset --hard "$PREVIOUS_COMMIT"
+
+              docker compose \
+                -f docker-compose.yml \
+                -f docker-compose.dev.yml \
+                build cvat_server cvat_ui
+
+              docker compose \
+                -f docker-compose.yml \
+                -f docker-compose.dev.yml \
+                up -d
+            else
+              echo "Deploy failed and no previous commit exists for rollback"
+            fi
+
+            docker compose ps
+            exit 1
+          fi
+
+          docker compose ps
+
+  move-deploy-tag:
+    needs: [decide, deploy]
+    if: needs.decide.outputs.should_deploy == 'true' && needs.deploy.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Move deploy marker tag
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+
+          git tag -f deploy/last "$GITHUB_SHA"
+          git push origin refs/tags/deploy/last --force

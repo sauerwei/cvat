@@ -32,6 +32,88 @@ import QualityConfigurationForm, { QualityConfiguration, ValidationMode } from '
 type TabName = 'local' | 'share' | 'remote' | 'cloudStorage';
 const core = getCore();
 
+function getDefaultTaskLabels(): CreateTaskData['labels'] {
+    return [
+        {
+            id: -1,
+            name: 'trafficlight_green',
+            color: '#24b353',
+            type: 'rectangle',
+            attributes: [],
+        },
+        {
+            id: -2,
+            name: 'trafficlight_red',
+            color: '#fa3253',
+            type: 'rectangle',
+            attributes: [],
+        },
+        {
+            id: -3,
+            name: 'pit_in',
+            color: '#ddff33',
+            type: 'rectangle',
+            attributes: [],
+        },
+        {
+            id: -4,
+            name: 'pit_out',
+            color: '#ddff33',
+            type: 'rectangle',
+            attributes: [],
+        },
+        {
+            id: -5,
+            name: 'park_parallel',
+            color: '#2a7dd1',
+            type: 'rectangle',
+            attributes: [],
+        },
+        {
+            id: -6,
+            name: 'park_cross',
+            color: '#2a7dd1',
+            type: 'rectangle',
+            attributes: [],
+        },
+        {
+            id: -7,
+            name: 'overtaking_prohibited',
+            color: '#f59331',
+            type: 'rectangle',
+            attributes: [],
+        },
+        {
+            id: -8,
+            name: 'overtaking_permitted',
+            color: '#f59331',
+            type: 'rectangle',
+            attributes: [],
+        },
+        {
+            id: -9,
+            name: 'car',
+            color: '#fa32b7',
+            type: 'rectangle',
+            attributes: [],
+        },
+        {
+            id: -10,
+            name: 'trafficlight',
+            color: '#aaf0d1',
+            type: 'rectangle',
+            attributes: [],
+        },
+        {
+            id: -11,
+            name: 'trafficlight_yellow',
+            color: '#fafa37',
+            type: 'rectangle',
+            attributes: [],
+        },
+    ];
+}
+
 export interface CreateTaskData {
     projectId: number | null;
     basic: BaseConfiguration;
@@ -93,7 +175,7 @@ const defaultState: State = {
         validationFramesPerJobPercent: 1,
         frameSelectionMethod: FrameSelectionMethod.RANDOM,
     },
-    labels: [],
+    labels: getDefaultTaskLabels(),
     files: {
         local: [],
         share: [],
@@ -240,11 +322,11 @@ class CreateTaskContent extends React.PureComponent<Props & RouteComponentProps,
     private handleProjectIdChange = (value: null | number): void => {
         const { projectId, subset } = this.state;
 
-        this.setState((state) => ({
+        this.setState({
             projectId: value,
             subset: value && value === projectId ? subset : '',
-            labels: value ? [] : state.labels,
-        }));
+            labels: value ? [] : getDefaultTaskLabels(),
+        });
     };
 
     private handleChangeBasicConfiguration = (values: BaseConfiguration): void => {
