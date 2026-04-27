@@ -3,6 +3,7 @@ on:
   workflow_dispatch:
 jobs:
   main:
+    if: github.repository_owner == 'cvat-ai'
     runs-on: ubuntu-latest
     steps:
       - name: Discover pending release

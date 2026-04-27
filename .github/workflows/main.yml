@@ -21,6 +21,7 @@ env:
 jobs:
   search_cache:
     if: |
+      github.repository_owner == 'cvat-ai' &&
       github.event.pull_request.draft == false &&
       !startsWith(github.event.pull_request.title, '[WIP]') &&
       !startsWith(github.event.pull_request.title, '[Dependent]')
