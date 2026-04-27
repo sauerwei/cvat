@@ -7,6 +7,7 @@ on:
 
 jobs:
   trigger:
+    if: github.repository_owner == 'cvat-ai'
     runs-on: ubuntu-latest
     steps:
       - name: Generate authentication token
