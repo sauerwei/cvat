@@ -50,7 +50,9 @@ jobs:
 
       - name: Create or update PR
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Prefer a PAT when present, because some fork setups cannot create PRs with the default GitHub token.
+          # Create a repo secret named SYNC_FORK_TOKEN with `repo` scope if the default token still fails.
+          GH_TOKEN: ${{ secrets.SYNC_FORK_TOKEN || github.token }}
         run: |
           set -euo pipefail
 

@@ -156,7 +156,47 @@ Notes:
 - The script writes a safety dump to `backups/pre_rollback_YYYYMMDD_HHMMSS.dump` which you can use to rollback again if needed.
 - After restore the script restarts Compose and prints current `engine_video` entries for quick verification.
 
-9) Quick verification commands
+9) Make CVAT reachable from other devices on the network
+-------------------------------------------------------
+If other people should open CVAT from another device, start Compose with the VM's IP address as `CVAT_HOST` and make sure port `8080` is reachable.
+
+Find the current VM IP:
+
+```bash
+hostname -I
+# or more specific:
+ip addr show | grep 'inet ' | grep -v '127.0.0.1'
+```
+
+Export the IP and start CVAT with it:
+
+```bash
+export CVAT_HOST=10.28.252.47
+docker compose up -d
+```
+
+If you want the IP to be reused in your shell session, you can also set it in one line:
+
+```bash
+export CVAT_HOST="$(hostname -I | awk '{print $1}')"
+docker compose up -d
+```
+
+Then open CVAT from another device in the same network via:
+
+```text
+http://10.28.252.47:8080/
+```
+
+If the page still is not reachable, allow the port in your firewall on the VM host:
+
+```bash
+sudo ufw allow 8080/tcp
+```
+
+If your VM IP changes often, consider making it static in your VM/network settings or use a local DNS name.
+
+10) Quick verification commands
 --------------------------------
 - List backups:
 

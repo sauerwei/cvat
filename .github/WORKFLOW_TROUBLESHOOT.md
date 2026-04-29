@@ -36,6 +36,13 @@ run: |
   gh pr create --title "..." --body "..."
 ```
 
+For this repository's fork sync workflow, you can use the secret `SYNC_FORK_TOKEN`. The workflow will prefer it and fall back to `github.token`:
+
+```yaml
+env:
+  GH_TOKEN: ${{ secrets.SYNC_FORK_TOKEN || github.token }}
+```
+
 4. Check the `create-github-app-token` usage: ensure the App ID and private key secrets are correct and that the App installation includes the target repository with required permissions.
 
 Verification
