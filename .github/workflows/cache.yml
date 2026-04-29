@@ -6,6 +6,7 @@ on:
 
 jobs:
   get-sha:
+    if: github.repository_owner == 'cvat-ai'
     uses: ./.github/workflows/search-cache.yml
 
   Caching_CVAT:

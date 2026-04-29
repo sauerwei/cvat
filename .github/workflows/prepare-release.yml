@@ -8,6 +8,11 @@ on:
         default: X.Y.Z
 jobs:
   main:
+    if: github.repository_owner == 'cvat-ai'
+    # Ensure the workflow has permission to push/create PRs when using GITHUB_TOKEN
+    permissions:
+      contents: write
+      pull-requests: write
     runs-on: ubuntu-latest
     steps:
       - name: Validate version number

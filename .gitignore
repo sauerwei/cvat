@@ -35,6 +35,8 @@ actions-runner
 /tests/cypress/screenshots
 .idea/
 
+actions-runner
+backups
 #Ignore helm-related files
 /helm-chart/Chart.lock
 /helm-chart/values.*.yaml

@@ -10,6 +10,7 @@ env:
 
 jobs:
   check_updates:
+    if: github.repository_owner == 'cvat-ai'
     runs-on: ubuntu-latest
     env:
       REPO: ${{ github.repository }}
