@@ -50,13 +50,18 @@ jobs:
 
       - name: Create or update PR
         env:
-          # Prefer a PAT when present, because some fork setups cannot create PRs with the default GitHub token.
-          # Create a repo secret named SYNC_FORK_TOKEN with `repo` scope if the default token still fails.
-          GH_TOKEN: ${{ secrets.SYNC_FORK_TOKEN || github.token }}
+          # Use a PAT from the fork repo secret. This avoids integration-token limits during PR creation.
+          GH_TOKEN: ${{ secrets.SYNC_FORK_TOKEN }}
         run: |
           set -euo pipefail
 
+          if [[ -z "${GH_TOKEN:-}" ]]; then
+            echo "SYNC_FORK_TOKEN secret is missing"
+            exit 1
+          fi
+
           PR_NUMBER=$(gh pr list \
+            --repo "${GITHUB_REPOSITORY}" \
             --head "$SYNC_BRANCH" \
             --base "$BASE_BRANCH" \
             --state open \
@@ -65,10 +70,12 @@ jobs:
 
           if [[ -n "$PR_NUMBER" ]]; then
             gh pr edit "$PR_NUMBER" \
+              --repo "${GITHUB_REPOSITORY}" \
               --title "chore: sync upstream/${BASE_BRANCH}" \
               --body "Automated upstream sync from ${UPSTREAM_REPO}:${BASE_BRANCH}."
           else
             gh pr create \
+              --repo "${GITHUB_REPOSITORY}" \
               --base "$BASE_BRANCH" \
               --head "$SYNC_BRANCH" \
               --title "chore: sync upstream/${BASE_BRANCH}" \
