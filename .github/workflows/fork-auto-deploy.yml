@@ -95,6 +95,7 @@ jobs:
 
       - name: Run deploy on self-hosted runner
         env:
+          CVAT_HOST: '10.28.252.47'
           HEALTHCHECK_URL: ${{ vars.DEPLOY_HEALTHCHECK_URL || 'http://localhost:8080/api/server/about' }}
         run: |
           set -euo pipefail
@@ -116,7 +117,7 @@ jobs:
 
           if [[ "$DEPLOY_FAILED" -eq 0 ]]; then
             MAX_TRIES=20
-            until curl -fsS "$HEALTHCHECK_URL" >/dev/null || [[ "$MAX_TRIES" -eq 0 ]]; do
+            until curl -fsS -H "Host: $CVAT_HOST" "$HEALTHCHECK_URL" >/dev/null || [[ "$MAX_TRIES" -eq 0 ]]; do
               echo "Waiting for healthcheck: $HEALTHCHECK_URL"
               MAX_TRIES=$((MAX_TRIES - 1))
               sleep 5

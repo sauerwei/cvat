@@ -95,6 +95,29 @@ Examples:
 RETENTION_DAYS=7 RSYNC_DEST="backup@example.com:/srv/backups/cvat" /home/devbox/Documents/cvat/dev/backup_cvat.sh
 ```
 
+Recommended routine backup setup
+-------------------------------
+For routine backups, use one of these two patterns:
+
+1. Local cron on the VM plus remote copy
+
+```bash
+# daily at 02:00, keep 30 days, copy to external backup host
+0 2 * * * cd /home/devbox/Documents/cvat && RETENTION_DAYS=30 RSYNC_DEST="backup@example.com:/srv/backups/cvat" /home/devbox/Documents/cvat/dev/backup_cvat.sh >> /var/log/cvat-backup.log 2>&1
+```
+
+2. Local cron on the VM plus encrypted remote copy
+
+```bash
+# public-key encryption before upload
+0 2 * * * cd /home/devbox/Documents/cvat && RETENTION_DAYS=30 GPG_RECIPIENT="backup@company.com" RSYNC_DEST="backup@example.com:/srv/backups/cvat" /home/devbox/Documents/cvat/dev/backup_cvat.sh >> /var/log/cvat-backup.log 2>&1
+```
+
+Notes:
+- Prefer an external backup host, NAS, or object storage over storing archives in a database.
+- If you really need a central storage system, use it as a file target (for example via `rsync`, NFS, S3, or GitLab artifacts), not as the place where the SQL dump itself is stored.
+- If you want no local cron, the same command can be scheduled with `systemd timer` or GitLab scheduled pipelines.
+
 Encryption before upload
 ------------------------
 The backup script can optionally encrypt backup files before uploading them. Two modes are supported:
