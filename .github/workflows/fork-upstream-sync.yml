@@ -60,6 +60,12 @@ jobs:
             exit 1
           fi
 
+          COMMITS_AHEAD=$(git rev-list --count "${BASE_BRANCH}..${SYNC_BRANCH}")
+          if [[ "${COMMITS_AHEAD}" -eq 0 ]]; then
+            echo "No commits to sync between ${BASE_BRANCH} and ${SYNC_BRANCH}; skipping PR creation."
+            exit 0
+          fi
+
           PR_NUMBER=$(gh pr list \
             --repo "${GITHUB_REPOSITORY}" \
             --head "$SYNC_BRANCH" \
