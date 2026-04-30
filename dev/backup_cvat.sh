@@ -7,89 +7,73 @@ PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 BACKUP_ROOT="${PROJECT_ROOT}/backups"
 STAMP="$(date +%Y%m%d_%H%M%S)"
 TARGET_DIR="${BACKUP_ROOT}/cvat_${STAMP}"
+COMPOSE_FILES="${COMPOSE_FILES:-}"
+CVAT_HOST_VALUE="${CVAT_HOST:-10.28.252.47}"
 
-# Configuration: retention in days and optional rsync destination
-# Set RETENTION_DAYS to 0 to disable automatic pruning
-RETENTION_DAYS="${RETENTION_DAYS:-30}"
-# Optional rsync destination, e.g. user@backup.example.com:/path/to/backups
-RSYNC_DEST="${RSYNC_DEST:-}"
-# Optional GPG settings:
-# If GPG_RECIPIENT is set, public-key encrypt files for that recipient.
-# If GPG_PASSPHRASE is set, symmetric encryption is used (AES256).
-# If ENCRYPTION_KEEP_PLAINTEXT is non-empty, keep plaintext files after encryption.
-GPG_RECIPIENT="${GPG_RECIPIENT:-}"
-GPG_PASSPHRASE="${GPG_PASSPHRASE:-}"
-ENCRYPTION_KEEP_PLAINTEXT="${ENCRYPTION_KEEP_PLAINTEXT:-}"
+compose_args=()
+if [ -n "${COMPOSE_FILES}" ]; then
+    read -r -a compose_args <<< "${COMPOSE_FILES}"
+fi
 
 mkdir -p "${TARGET_DIR}"
 
+restore_services=false
+
+cleanup() {
+    if [ "${restore_services}" = true ]; then
+        echo "Starting CVAT containers with CVAT_HOST=${CVAT_HOST_VALUE}"
+        (
+            cd "${PROJECT_ROOT}"
+            CVAT_HOST="${CVAT_HOST_VALUE}" docker compose "${compose_args[@]}" up -d
+        )
+    fi
+}
+
+trap cleanup EXIT
+
+echo "Stopping CVAT containers"
+(
+    cd "${PROJECT_ROOT}"
+    CVAT_HOST="${CVAT_HOST_VALUE}" docker compose "${compose_args[@]}" stop
+)
+restore_services=true
+
 echo "Creating backup in ${TARGET_DIR}"
 
-docker exec cvat_db pg_dump -U root -d cvat -Fc > "${TARGET_DIR}/cvat_db.dump"
+docker run --rm --name temp_backup \
+    --volumes-from cvat_db \
+    -v "${TARGET_DIR}:/backup" \
+    ubuntu \
+    tar -czvf /backup/cvat_db.tar.gz /var/lib/postgresql/data
 
-for vol in cvat_cvat_data cvat_cvat_keys cvat_cvat_logs; do
-    docker run --rm \
-        -v "${vol}:/source:ro" \
-        -v "${TARGET_DIR}:/backup" \
-        alpine:3.22 \
-        sh -lc "tar -czf /backup/${vol}.tar.gz -C /source ."
-done
+docker run --rm --name temp_backup \
+    --volumes-from cvat_server \
+    -v "${TARGET_DIR}:/backup" \
+    ubuntu \
+    tar -czvf /backup/cvat_data.tar.gz /home/django/data
+
+docker run --rm --name temp_backup \
+    --volumes-from cvat_clickhouse \
+    -v "${TARGET_DIR}:/backup" \
+    ubuntu \
+    tar -czvf /backup/cvat_events_db.tar.gz /var/lib/clickhouse
 
 cat > "${TARGET_DIR}/RESTORE.txt" <<EOF
 Backup created: $(date -Iseconds)
 
-Files:
-- cvat_db.dump
-- cvat_cvat_data.tar.gz
-- cvat_cvat_keys.tar.gz
-- cvat_cvat_logs.tar.gz
+Restore CVAT from this backup using the same CVAT version:
 
-Restore database:
-  docker exec -i cvat_db pg_restore -U root -d cvat --clean --if-exists < cvat_db.dump
+1. Stop CVAT containers:
+   CVAT_HOST=${CVAT_HOST_VALUE} docker compose ${COMPOSE_FILES} stop
 
-Restore volume data (example for cvat_cvat_data):
-  docker run --rm -v cvat_cvat_data:/target -v \$(pwd):/backup alpine:3.22 sh -lc "cd /target && tar -xzf /backup/cvat_cvat_data.tar.gz"
+2. Restore data from inside this directory:
+   cd ${TARGET_DIR}
+   docker run --rm --name temp_backup --volumes-from cvat_db -v \$(pwd):/backup ubuntu bash -c "cd /var/lib/postgresql/data && tar -xvf /backup/cvat_db.tar.gz --strip 4"
+   docker run --rm --name temp_backup --volumes-from cvat_server -v \$(pwd):/backup ubuntu bash -c "cd /home/django/data && tar -xvf /backup/cvat_data.tar.gz --strip 3"
+   docker run --rm --name temp_backup --volumes-from cvat_clickhouse -v \$(pwd):/backup ubuntu bash -c "cd /var/lib/clickhouse && tar -xvf /backup/cvat_events_db.tar.gz --strip 3"
+
+3. Start CVAT again:
+   CVAT_HOST=${CVAT_HOST_VALUE} docker compose ${COMPOSE_FILES} up -d
 EOF
 
 echo "Backup completed: ${TARGET_DIR}"
-
-# Prune old backups
-if [ "${RETENTION_DAYS}" -gt 0 ]; then
-  echo "Pruning backups older than ${RETENTION_DAYS} days"
-  find "${BACKUP_ROOT}" -maxdepth 1 -type d -name 'cvat_*' -mtime +${RETENTION_DAYS} -print -exec rm -rf {} \;
-fi
-
-# Optional upload via rsync (requires SSH keys / access configured)
-if [ -n "${RSYNC_DEST}" ]; then
-  echo "Uploading ${TARGET_DIR} to ${RSYNC_DEST} via rsync"
-  # If encryption requested, encrypt files before upload
-  ENCRYPTED=false
-  if command -v gpg >/dev/null 2>&1 && { [ -n "${GPG_RECIPIENT}" ] || [ -n "${GPG_PASSPHRASE}" ]; }; then
-    echo "Encrypting backup files with GPG"
-    for f in "${TARGET_DIR}"/*; do
-      if [ -f "$f" ]; then
-        out="$f.gpg"
-        if [ -n "${GPG_RECIPIENT}" ]; then
-          gpg --batch --yes --output "$out" --encrypt -r "${GPG_RECIPIENT}" "$f"
-        else
-          gpg --batch --yes --pinentry-mode loopback --passphrase "${GPG_PASSPHRASE}" -c --cipher-algo AES256 --output "$out" "$f"
-        fi
-      fi
-    done
-    ENCRYPTED=true
-    if [ -z "${ENCRYPTION_KEEP_PLAINTEXT}" ]; then
-      echo "Removing plaintext backup files"
-      find "${TARGET_DIR}" -maxdepth 1 -type f \( -name '*.dump' -o -name '*.tar.gz' \) -delete || true
-    fi
-  else
-    if [ -n "${GPG_RECIPIENT}" ] || [ -n "${GPG_PASSPHRASE}" ]; then
-      echo "Warning: gpg not found or not configured; skipping encryption"
-    fi
-  fi
-
-  if [ "${ENCRYPTED}" = true ]; then
-    rsync -av --delete "${TARGET_DIR}/" "${RSYNC_DEST%/}/$(basename "${TARGET_DIR}")/"
-  else
-    rsync -av --delete "${TARGET_DIR}/" "${RSYNC_DEST%/}/$(basename "${TARGET_DIR}")/"
-  fi
-fi
