@@ -1,7 +1,5 @@
 name: CI-nightly
 on:
-  schedule:
-    - cron: '0 22 * * *'
   workflow_dispatch:
 
 env:

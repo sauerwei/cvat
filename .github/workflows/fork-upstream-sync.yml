@@ -2,7 +2,8 @@ name: Fork Upstream Sync
 
 on:
   schedule:
-    - cron: '0 */6 * * *'
+    # Check for upstream changes daily at 2 AM UTC
+    - cron: '0 2 * * *'
   workflow_dispatch:
     inputs:
       base_branch:
@@ -39,12 +40,27 @@ jobs:
             git remote add upstream "https://github.com/${UPSTREAM_REPO}.git"
           fi
 
-      - name: Sync branch to upstream
+      - name: Fetch and check upstream
         run: |
           set -euo pipefail
           git fetch origin --prune
           git fetch upstream --prune
 
+      - name: Check commit threshold
+        run: |
+          set -euo pipefail
+          COMMIT_THRESHOLD=10
+          COMMITS_AHEAD=$(git rev-list --count "${BASE_BRANCH}..upstream/${BASE_BRANCH}")
+          echo "Commits on upstream ahead of local ${BASE_BRANCH}: ${COMMITS_AHEAD}"
+          if [[ ${COMMITS_AHEAD} -lt ${COMMIT_THRESHOLD} ]]; then
+            echo "Only ${COMMITS_AHEAD} commits on upstream (need ${COMMIT_THRESHOLD}); skipping sync."
+            exit 0
+          fi
+          echo "Threshold reached (${COMMITS_AHEAD} >= ${COMMIT_THRESHOLD}). Proceeding with sync..."
+
+      - name: Sync branch to upstream and push
+        run: |
+          set -euo pipefail
           git switch -C "$SYNC_BRANCH" "upstream/$BASE_BRANCH"
           git push --force-with-lease origin "$SYNC_BRANCH"
 
@@ -75,15 +91,33 @@ jobs:
             --jq '.[0].number')
 
           if [[ -n "$PR_NUMBER" ]]; then
+            echo "Updating existing PR #${PR_NUMBER}..."
             gh pr edit "$PR_NUMBER" \
               --repo "${GITHUB_REPOSITORY}" \
               --title "chore: sync upstream/${BASE_BRANCH}" \
               --body "Automated upstream sync from ${UPSTREAM_REPO}:${BASE_BRANCH}."
           else
+            echo "Creating new PR..."
             gh pr create \
               --repo "${GITHUB_REPOSITORY}" \
               --base "$BASE_BRANCH" \
               --head "$SYNC_BRANCH" \
               --title "chore: sync upstream/${BASE_BRANCH}" \
               --body "Automated upstream sync from ${UPSTREAM_REPO}:${BASE_BRANCH}."
+            PR_NUMBER=$(gh pr list \
+              --repo "${GITHUB_REPOSITORY}" \
+              --head "$SYNC_BRANCH" \
+              --base "$BASE_BRANCH" \
+              --state open \
+              --json number \
+              --jq '.[0].number')
+          fi
+
+          # Auto-merge the PR if created/updated successfully
+          if [[ -n "$PR_NUMBER" ]]; then
+            echo "Auto-merging PR #${PR_NUMBER}..."
+            gh pr merge "$PR_NUMBER" \
+              --repo "${GITHUB_REPOSITORY}" \
+              --squash \
+              --auto || echo "Auto-merge queue attempt completed (may already be queued)"
           fi

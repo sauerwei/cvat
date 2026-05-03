@@ -1,0 +1,93 @@
+name: Scheduled CVAT Backup
+
+on:
+  schedule:
+    # Run daily at 04:00 UTC (adjust timezone as needed)
+    - cron: '0 4 * * *'
+  workflow_dispatch:
+    inputs:
+      backup_name:
+        description: 'Optional backup name/description'
+        required: false
+        default: 'manual-backup'
+
+permissions:
+  contents: read
+
+jobs:
+  backup:
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run CVAT backup
+        env:
+          CVAT_HOST: ${{ secrets.CVAT_HOST || '10.28.252.47' }}
+          COMPOSE_FILES: ${{ secrets.COMPOSE_FILES || '' }}
+        run: |
+          cd "${{ github.workspace }}"
+          bash dev/backup_cvat.sh
+
+      - name: List backup contents
+        run: |
+          BACKUP_DIR=$(ls -td ${{ github.workspace }}/backups/cvat_* 2>/dev/null | head -1)
+          if [ -d "$BACKUP_DIR" ]; then
+            echo "Backup created at: $BACKUP_DIR"
+            echo "Contents:"
+            ls -lh "$BACKUP_DIR"
+          fi
+
+      - name: Send backup to remote storage (optional)
+        if: ${{ secrets.RSYNC_DEST != '' }}
+        env:
+          RSYNC_DEST: ${{ secrets.RSYNC_DEST }}
+          RSYNC_KEY: ${{ secrets.RSYNC_KEY }}
+        run: |
+          set -euo pipefail
+          BACKUP_DIR=$(ls -td ${{ github.workspace }}/backups/cvat_* 2>/dev/null | head -1)
+
+          if [ -z "$BACKUP_DIR" ]; then
+            echo "No backup directory found"
+            exit 1
+          fi
+
+          if [ -n "${RSYNC_KEY:-}" ]; then
+            # Setup SSH key for rsync
+            mkdir -p ~/.ssh
+            echo "$RSYNC_KEY" > ~/.ssh/backup_key
+            chmod 600 ~/.ssh/backup_key
+
+            echo "Syncing backup to remote storage..."
+            rsync -avz --delete \
+              -e "ssh -i ~/.ssh/backup_key -o StrictHostKeyChecking=no" \
+              "$BACKUP_DIR/" "$RSYNC_DEST/"
+
+            rm -f ~/.ssh/backup_key
+            echo "Backup synced successfully"
+          else
+            echo "RSYNC_KEY not configured, skipping remote sync"
+          fi
+
+      - name: Cleanup old backups (keep last 7 days)
+        run: |
+          set -euo pipefail
+          BACKUP_ROOT="${{ github.workspace }}/backups"
+          RETENTION_DAYS=7
+
+          if [ -d "$BACKUP_ROOT" ]; then
+            echo "Cleaning up backups older than $RETENTION_DAYS days..."
+            find "$BACKUP_ROOT" -maxdepth 1 -type d -name "cvat_*" -mtime +${RETENTION_DAYS} -exec rm -rfv {} \; || true
+            echo "Cleanup completed"
+          fi
+
+      - name: Backup status
+        if: success()
+        run: |
+          echo "✅ Backup completed successfully"
+          echo "📁 Backup location: ${{ github.workspace }}/backups"
+
+      - name: Backup failed notification
+        if: failure()
+        run: |
+          echo "❌ Backup failed - check logs"
+          exit 1
