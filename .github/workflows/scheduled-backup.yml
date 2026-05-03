@@ -33,8 +33,7 @@ jobs:
 
       - name: List backup contents
         run: |
-          BACKUP_DIR=$(ls -td ${{ github.workspace }}/backups/cvat_* \
-            2>/dev/null | head -1)
+          BACKUP_DIR=/home/devbox/Documents/cvat/backups
           if [ -d "$BACKUP_DIR" ]; then
             echo "Backup created at: $BACKUP_DIR"
             echo "Contents:"

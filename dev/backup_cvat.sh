@@ -4,7 +4,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
-BACKUP_ROOT="${PROJECT_ROOT}/backups"
+BACKUP_ROOT="${BACKUP_ROOT:-${PROJECT_ROOT}/backups}"
 STAMP="$(date +%Y%m%d_%H%M%S)"
 TARGET_DIR="${BACKUP_ROOT}/cvat_${STAMP}"
 COMPOSE_FILES="${COMPOSE_FILES:-}"
@@ -15,6 +15,7 @@ if [ -n "${COMPOSE_FILES}" ]; then
     read -r -a compose_args <<< "${COMPOSE_FILES}"
 fi
 
+echo "Using BACKUP_ROOT=${BACKUP_ROOT}"
 mkdir -p "${TARGET_DIR}"
 
 restore_services=false
