@@ -21,6 +21,7 @@ jobs:
     env:
       CVAT_HOST: ${{ vars.CVAT_HOST }}
       COMPOSE_FILES: ${{ vars.COMPOSE_FILES }}
+      BACKUP_ROOT: /home/devbox/Documents/cvat/backups
     steps:
       - uses: actions/checkout@v4
 
@@ -29,11 +30,12 @@ jobs:
           cd "${{ github.workspace }}"
           export CVAT_HOST="${CVAT_HOST:-10.28.252.47}"
           export COMPOSE_FILES="${COMPOSE_FILES:-}"
+          export BACKUP_ROOT="${BACKUP_ROOT:-/home/devbox/Documents/cvat/backups}"
           bash dev/backup_cvat.sh
 
       - name: List backup contents
         run: |
-          BACKUP_DIR=/home/devbox/Documents/cvat/backups
+          BACKUP_DIR="${BACKUP_ROOT}"
           if [ -d "$BACKUP_DIR" ]; then
             echo "Backup created at: $BACKUP_DIR"
             echo "Contents:"
@@ -43,7 +45,7 @@ jobs:
       - name: Cleanup old backups (keep last 7 days)
         run: |
           set -euo pipefail
-          BACKUP_ROOT="${{ github.workspace }}/backups"
+          BACKUP_ROOT="${BACKUP_ROOT:-/home/devbox/Documents/cvat/backups}"
           RETENTION_DAYS=7
 
           if [ -d "$BACKUP_ROOT" ]; then
@@ -57,7 +59,7 @@ jobs:
         if: success()
         run: |
           echo "✅ Backup completed successfully"
-          echo "📁 Backup location: ${{ github.workspace }}/backups"
+          echo "📁 Backup location: ${BACKUP_ROOT}"
 
       - name: Backup failed notification
         if: failure()
