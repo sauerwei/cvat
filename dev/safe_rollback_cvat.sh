@@ -142,7 +142,7 @@ echo "DB restore finished"
 
 echo "Restarting CVAT services"
 cd "$PROJECT_ROOT"
-docker-compose restart || true
+docker compose -f docker-compose.yml -f components/serverless/docker-compose.serverless.yml restart || true
 
 echo "Done. Current engine_video entries:"
 docker exec cvat_db psql -U root -d cvat -c "select id, path from engine_video order by id desc limit 200;"

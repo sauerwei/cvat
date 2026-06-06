@@ -1,0 +1,61 @@
+metadata:
+  name: pytorch-custom-rtmdet-traffic
+  namespace: cvat
+  annotations:
+    name: RTMDet Traffic Detector
+    type: detector
+    spec: |
+      [
+        { "id": 0, "name": "pit_in",                "type": "rectangle" },
+        { "id": 1, "name": "pit_out",               "type": "rectangle" },
+        { "id": 2, "name": "park_parallel",         "type": "rectangle" },
+        { "id": 3, "name": "car",                   "type": "rectangle" },
+        { "id": 4, "name": "trafficlight_red",      "type": "rectangle" },
+        { "id": 5, "name": "park_cross",            "type": "rectangle" },
+        { "id": 6, "name": "overtaking_permitted",  "type": "rectangle" },
+        { "id": 7, "name": "overtaking_prohibited", "type": "rectangle" },
+        { "id": 8, "name": "trafficlight_green",    "type": "rectangle" }
+      ]
+
+spec:
+  description: RTMDet-tiny traffic detector trained with MMDetection — 9 classes
+  runtime: 'python:3.10'
+  handler: main:handler
+  eventTimeout: 120s
+
+  build:
+    image: cvat.pytorch.custom.rtmdet-traffic
+    baseImage: ubuntu:22.04
+
+    directives:
+      preCopy:
+        - kind: RUN
+          value: apt-get update && apt-get install --no-install-recommends -y python3-pip python-is-python3 libgl1 libglib2.0-0 && rm -rf /var/lib/apt/lists/*
+        - kind: RUN
+          value: pip install --no-cache-dir "torch==2.1.2" "torchvision==0.16.2" --index-url https://download.pytorch.org/whl/cpu
+        - kind: RUN
+          value: pip install --no-cache-dir "mmengine==0.10.7"
+        - kind: RUN
+          value: pip install --no-cache-dir "mmcv==2.1.0" -f https://download.openmmlab.com/mmcv/dist/cpu/torch2.1/index.html
+        - kind: RUN
+          value: pip install --no-cache-dir "mmdet==3.3.0" "numpy>=1.20,<2.0" pillow pyyaml
+        - kind: WORKDIR
+          value: /opt/nuclio
+      postCopy:
+        - kind: RUN
+          value: python -c "import mmdet; print('mmdet', mmdet.__version__)"
+
+  triggers:
+    myHttpTrigger:
+      numWorkers: 2
+      kind: 'http'
+      workerAvailabilityTimeoutMilliseconds: 10000
+      attributes:
+        maxRequestBodySize: 33554432 # 32MB
+
+  platform:
+    attributes:
+      restartPolicy:
+        name: always
+        maximumRetryCount: 3
+      mountMode: volume

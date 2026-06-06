@@ -7,7 +7,7 @@ PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 BACKUP_ROOT="${BACKUP_ROOT:-${PROJECT_ROOT}/backups}"
 STAMP="$(date +%Y%m%d_%H%M%S)"
 TARGET_DIR="${BACKUP_ROOT}/cvat_${STAMP}"
-COMPOSE_FILES="${COMPOSE_FILES:-}"
+COMPOSE_FILES="${COMPOSE_FILES:--f docker-compose.yml -f components/serverless/docker-compose.serverless.yml}"
 CVAT_HOST_VALUE="${CVAT_HOST:-10.28.252.47}"
 
 compose_args=()
@@ -18,6 +18,83 @@ fi
 echo "Using BACKUP_ROOT=${BACKUP_ROOT}"
 mkdir -p "${TARGET_DIR}"
 
+# ---------------------------------------------------------------------------
+# Health check helpers
+# ---------------------------------------------------------------------------
+CRITICAL_CONTAINERS=(
+    cvat_db
+    cvat_redis_inmem
+    cvat_redis_ondisk
+    cvat_server
+    cvat_ui
+    cvat_opa
+    cvat_clickhouse
+    cvat_worker_annotation
+)
+
+HEALTHCHECK_WAIT_SECONDS=60
+RESTART_WAIT_SECONDS=30
+MAX_RESTART_ATTEMPTS=3
+
+_container_status() {
+    local name="$1"
+    local health
+    health=$(docker inspect --format '{{.State.Health.Status}}' "${name}" 2>/dev/null)
+    if [ -n "${health}" ]; then
+        echo "${health}"
+        return
+    fi
+    local running
+    running=$(docker inspect --format '{{.State.Running}}' "${name}" 2>/dev/null)
+    if [ "${running}" = "true" ]; then
+        echo "running"
+    else
+        echo "stopped"
+    fi
+}
+
+_run_healthcheck() {
+    echo ""
+    echo "Waiting ${HEALTHCHECK_WAIT_SECONDS}s for containers to settle..."
+    sleep "${HEALTHCHECK_WAIT_SECONDS}"
+
+    echo "Running container health checks..."
+    local all_healthy=true
+
+    for container in "${CRITICAL_CONTAINERS[@]}"; do
+        local attempt=0
+        while [ "${attempt}" -lt "${MAX_RESTART_ATTEMPTS}" ]; do
+            local status
+            status=$(_container_status "${container}")
+            if [ "${status}" = "healthy" ] || [ "${status}" = "running" ]; then
+                echo "  [OK]      ${container} (${status})"
+                break
+            fi
+
+            attempt=$((attempt + 1))
+            if [ "${attempt}" -lt "${MAX_RESTART_ATTEMPTS}" ]; then
+                echo "  [RESTART] ${container} is '${status}' — restarting (attempt ${attempt}/${MAX_RESTART_ATTEMPTS})..."
+                docker restart "${container}" 2>/dev/null || true
+                echo "            Waiting ${RESTART_WAIT_SECONDS}s..."
+                sleep "${RESTART_WAIT_SECONDS}"
+            else
+                echo "  [FAIL]    ${container} still '${status}' after ${MAX_RESTART_ATTEMPTS} attempts"
+                all_healthy=false
+            fi
+        done
+    done
+
+    echo ""
+    if [ "${all_healthy}" = "true" ]; then
+        echo "All critical containers are healthy."
+    else
+        echo "WARNING: One or more containers failed to recover. Check logs with:"
+        echo "  docker compose ${COMPOSE_FILES} logs --tail=50 <container>"
+    fi
+}
+
+# ---------------------------------------------------------------------------
+
 restore_services=false
 
 cleanup() {
@@ -27,6 +104,7 @@ cleanup() {
             cd "${PROJECT_ROOT}"
             CVAT_HOST="${CVAT_HOST_VALUE}" docker compose "${compose_args[@]}" up -d
         )
+        _run_healthcheck
     fi
 }
 

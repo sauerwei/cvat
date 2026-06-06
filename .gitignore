@@ -62,6 +62,8 @@ cvat-canvas/dist
 cvat-canvas3d/dist
 cvat-ui/dist
 
+epoch_200.pth
+epoch_200_ema.pth
 # produced by prepare in the root package.json script
 .husky
 
